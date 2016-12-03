@@ -1,10 +1,14 @@
 {
   "name": "tempit",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Simple Online Temporary Storage App",
   "main": "index.js",
   "bin": {
     "tempit": "./index.js"
+  },
+  "repository" : {
+    "type" : "git",
+    "url" : "https://github.com/thekoushik/tempit.git"
   },
   "keywords": ["temporary","app","cli","storage","quick"],
   "author": "Koushik Seal",
