@@ -1,4 +1,4 @@
-# TempIt
+# TempIt [ This project is now obsolete ]
 
 Simple Online Temporary Storage App
 
