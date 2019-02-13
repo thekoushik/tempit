@@ -1,186 +1,280 @@
 #!/usr/bin/env node
 
-var request=require('superagent');
-var getmac=require('getmac');
+const fs = require('fs');
+const process=require('process');
+const path=require('path');
+const TEMPITFILE=".tempit";
+const VERSION=require('./package.json').version;
 var readline = require('readline-sync');
-var isReachable = require('is-reachable');
-var chalk = require('chalk');
-var os = require('os');
-var path = require('path');
-var fs = require('fs');
 var tmp = require('tmp');
-var ProgressBar = require('progress');
-var https = require('https');
-var fstream=require('fstream');
+const net = require('net');
 var tar=require('tar');
-var zlib=require('zlib');
 
-var host="tempit-thekoushik.rhcloud.com";
-var website="https://"+host;
-var commands=['set','reset','up','down',"help"];
-var command=process.argv[2]?process.argv[2].toLowerCase():"";
-var command2=process.argv[3];
-
-if(command=="" || command=="help"){
-    console.log([
-        "",
-        "Usage: tempit <command>",
-        "",
-        "where <command> is one of:",
-        "    set, reset, up, down, help",
-        "",
-        "tempit set [name]   add this machine to your tempit account (Login required)",
-        "tempit reset        remove this machine from your tempit account",
-        "tempit up           upload the content of current directory",
-        "tempit down         download previous upload to current directory",
-        "tempit help         view this help",
-        "",
-        "To use this app, signup to TempIt. Previous upload is discarded upon upload."
-    ].join("\n"));
-}else if(commands.indexOf(command)<0){
-    console.log("Invalid command, try: tempit help");
-}else{
-    process.stdout.write("Initializing....(Please Wait)");
-    getmac.getMac(function(e,mac){
-        if(e){
-            process.stdout.write("\r\x1b[K");
-            throw e;
+const getTempit=()=>{
+    try{
+        fs.accessSync(TEMPITFILE,fs.constants.F_OK|fs.constants.R_OK)
+        try{
+            return JSON.parse(fs.readFileSync(TEMPITFILE,'utf8'));
+        }catch(e){
+            console.log(e)
+            throw new Error("Corrupted tempit file encountered.");
         }
-        isReachable(website).then(function(reachable){
-            process.stdout.write("\r\x1b[K");
-            if(!reachable){
-                console.log(chalk.red("Server is unreachable right now, please check your internet connection or try again later."));
-                return;
-            }
-            if(command=='set'){
-                var email=readline.question('Email:');
-                var pass=readline.question('Password:',{hideEchoBack: true});
-                if(command2==undefined) command2="";
-                process.stdout.write("Verifying....(Please Wait)");
-                request.post(website+"/setmac.php")
-                .type('form')
-                .send({type:'set'})
-                .send({email:email})
-                .send({password:pass})
-                .send({address:mac})
-                .send({name:command2})
-                .end(function(e,res){
-                    process.stdout.write("\r\x1b[K");
-                    //console.log(res.text);
-                    if(res.text=="-1"){
-                        console.log(chalk.red("Authentication Failed -","Wrong Credentials!"));
-                    }else if(res.text=="1"){
-                        console.log(chalk.green("Success"));
-                    }else{
-                        console.log(chalk.red("Internal Server Error :("));
-                    }
-                });
-            }else if(command=='reset'){
-                process.stdout.write("Verifying....(Please Wait)");
-                request.post(website+"/setmac.php")
-                .type('form')
-                .send({type:'reset'})
-                .send({address:mac})
-                .end(function(e,res){
-                    process.stdout.write("\r\x1b[K");
-                    //console.log(res.text);
-                    if(res.text=="1"){
-                        console.log(chalk.green("Success"));
-                    }else{
-                        console.log(chalk.red("Internal Server Error :("));
-                    }
-                });
-            }else if(command=='up'){
-                process.stdout.write("Archiving....(Please Wait)");
-                var tmpobj = tmp.fileSync();
-                //var filename="target.tar.gz";
-                var source=tmpobj.name;
-                
-                fstream.Reader({ 'path': process.cwd(), 'type': 'Directory' })
-                .pipe(tar.Pack({ fromBase: true }))
-                .pipe(zlib.Gzip()
-                    .on('end', function() {
-
-                        process.stdout.write("\r\x1b[K");
-                        //process.stdout.write("Sending....(Please Wait)");
-                        var len=fs.statSync(source)["size"];
-                        if(len>=10*1024*1024){
-                            console.log(chalk.red("Max size exceeded!(upto 10MB)"));
-                            fs.unlink(source);
-                            return;
-                        }
-                        var bar = new ProgressBar('  uploading [:bar] :percent :etas', {complete: '=',incomplete: ' ',width: 20,total: len,clear:true});
-                        request.post(website+"/upload.php")
-                        .field('type','up')
-                        .field('address',mac)
-                        .attach('file', source)
-                        .on('progress',function(event){
-                            //var total = event.total;
-                            //var loaded = event.loaded;
-                            bar.update(event.loaded/event.total);
-                        })
-                        .on('error',function(e){
-                            fs.unlink(source);
-                            console.log("error",e);
-                        })
-                        .end(function(e,res){
-                            if(res.text=="0")
-                                console.log(chalk.red("Upload failed"));
-                            else
-                                console.log(chalk.green("Complete"));
-                            fs.unlink(source);
-                        });
-                    })
-                )
-                .pipe(fs.createWriteStream(source,{fd:tmpobj.fd}));
-                
-            }else if(command=='down'){
-                process.stdout.write("Verifying....(Please Wait)");
-                var tmpobj = tmp.fileSync();
-                var source=tmpobj.name;
-                var output = fs.createWriteStream(source,{fd:tmpobj.fd});
-                request.post(website+"/upload.php")
-                .type('form')
-                .send({type:'down'})
-                .send({address:mac})
-                .end(function(e,res){
-                    process.stdout.write("\r\x1b[K");
-                    if(res.text=="-1"){
-                        console.log(chalk.red("This machine is not recognised to the server."));
-                        return;
-                    }else if(res.text==""){
-                        console.log(chalk.red("No previous upload found."));
-                        return;
-                    }
-                    process.stdout.write("Allocating....(Please Wait)");
-                    var req = https.request({hostname: host,path: "/"+res.text});
-                    req.on('response', function(res){
-                        var len = parseInt(res.headers['content-length'], 10);
-                        process.stdout.write("\r\x1b[K");
-                        var bar = new ProgressBar('  downloading [:bar] :percent :etas', {complete: '=',incomplete: ' ',width: 20,total: len,clear:true});
-                        res.on('data', function (chunk) {
-                            output.write(chunk);
-                            bar.tick(chunk.length);
-                        })
-                        .on('error', function (e) {console.log(e);})
-                        .on('end', function () {
-                            output.end();
-                            process.stdout.write("Extracting....(Please Wait)");
-                            fs.createReadStream(source)
-                            .pipe(zlib.createGunzip())
-                            .pipe(tar.Extract({path: process.cwd()})
-                                .on('error', function(){console.log(e);})
-                                .on('end', function(){
-                                    fs.unlink(source);
-                                    process.stdout.write("\r\x1b[K");
-                                    console.log(chalk.green("Complete"));
-                                })
-                            );
-                        });
-                    });
-                    req.end();
-                });
-            }
-        });
-    });
+    }catch(e){
+        return null;
+    }
 }
+const putTempit=(data)=>{
+    if(!currentConf) currentConf={...data};
+    if(data) currentConf={...currentConf,...data};
+    try{
+        fs.writeFileSync(TEMPITFILE,JSON.stringify(currentConf,null,2), 'utf8');
+    }catch(e){
+        console.log(e);
+        throw new Error("Cannot write modify tempit config");
+    }
+}
+const getOptions=(array)=>{
+    var options={};
+    var command=null;
+    var args=[];
+    array.forEach((item)=>{
+        if(item.startsWith("-") && item.length==2 && !item.endsWith("-")){
+            var op=item.substr(1);
+            if(options[op])
+                throw new Error("Multiple "+item+" option specified");
+            if(!availableOptions[op])
+                throw new Error("Invalid option "+item);
+            options[op]=true;
+            if(availableOptions[op].alias)
+                options[availableOptions[op].alias]=true;
+        }else if(item.startsWith("--") && item.length>2 && !item.startsWith("---")){
+            var op=item.substr(2);
+            if(options[op])
+                throw new Error("Multiple "+item+" option specified");
+            if(!availableOptions[op])
+                throw new Error("Invalid option "+item);
+            options[op]=true;
+        }else{
+            if(!command){
+                if(!availableCommands[item])
+                    throw new Error("Invalid command "+item);
+                command=item;
+            }else
+                args.push(item);
+        }
+    })
+    return {options,command,args};
+}
+const getConsoleInput=(question)=>readline.question(question);
+const run=(cmd,options,args)=>{
+    if(cmd && availableCommands[cmd])
+        availableCommands[cmd].fn(options,args);
+    else{
+        if(options.version) console.log(VERSION);
+        else run("help",options,args);
+    }
+}
+var currentConf=getTempit();
+const currentDirectory=process.cwd();
+var freshConf={
+    name: currentDirectory.split(path.sep).pop(),
+    version: "0.0.1",
+    description: "Your project description",
+    modules:{},
+    port:55555
+};
+
+var getGitIgnoredFileList=(dir)=>{
+    var files=fs.readdirSync(dir || process.cwd());
+    try{
+        fs.accessSync('.gitignore',fs.constants.R_OK);
+        var ignores=fs.readFileSync('.gitignore').toString().split('\r\n').filter(a=>!a.startsWith("#") && a.trim().length>0 && a.indexOf("/")==-1);
+        ignores.push('.git');
+        files=files.filter(f=>!ignores.includes(f))
+    }catch(e){}
+    return files;
+}
+
+var zipit=(mod,cb)=>{
+    var target_directory=process.cwd();
+    var source=tmp.tmpNameSync({postfix:".tgz"});
+    var files=[];
+    if(!mod)
+        files=getGitIgnoredFileList(target_directory);
+    else if(!currentConf.modules[mod])
+        return console.log("Module "+mod+" not found");
+    else
+        files=currentConf.modules[mod].files.length>0?currentConf.modules[mod].files:getGitIgnoredFileList(target_directory);
+    tar.c({ z: true, C: target_directory, file: source}, files, (_)=>{
+        if(cb) cb(source);
+        //console.log("finish");
+        //fs.copyFileSync(source,target_directory+path.sep+"archive.tgz");
+        fs.unlinkSync(source);
+    })
+};
+var unzipit=(data,target_directory,cb)=>{
+    var source = tmp.tmpNameSync({postfix:".tgz"});
+    fs.writeFileSync(source,data)
+    tar.x({ C: target_directory,keep:false,file:source },(_)=>{
+        if(cb) cb();
+        fs.unlinkSync(source);
+    })
+}
+
+const availableCommands={
+    "init":{
+        description:"Initializes the project settings",
+        fn:(options,args)=>{
+            var doInit=()=>{
+                try{
+                    fs.accessSync("package.json",fs.constants.F_OK)
+                    var packageJSON=JSON.parse(fs.readFileSync("package.json",'utf8'))
+                    freshConf.name=packageJSON.name;
+                    freshConf.description=packageJSON.description;
+                    freshConf.version=packageJSON.version;
+                }catch(e){
+                    try{
+                        fs.accessSync("composer.json",fs.constants.F_OK)
+                        var composerJSON=JSON.parse(fs.readFileSync("composer.json",'utf8'))
+                        freshConf.name=composerJSON.name;
+                        freshConf.description=composerJSON.description;
+                    }catch(e){
+                    }
+                }
+                putTempit(freshConf);
+                console.log("Init successfully");
+            };
+            if(!currentConf)
+                doInit();
+            else{
+                var v=getConsoleInput("Already initialized. Reinitialize?(y/n) ");
+                if(v.toLowerCase().startsWith("y")){
+                    doInit();
+                }
+            }
+        }
+    },
+    "help":{
+        description:"Displays this help",
+        fn:()=>{
+            console.log("Tempit v"+VERSION);
+            console.log("Usage:\n\ttempit [COMMAND] [OPTIONS] [ARGUMENTS]");
+            console.log("\nCommands:\n\t"+Object.keys(availableCommands).map(a=>a+"\t"+availableCommands[a].description).join("\n\t"));
+            var optionHelp={};
+            Object.keys(availableOptions).forEach((a)=>{
+                if(availableOptions[a].alias)
+                    optionHelp[availableOptions[a].alias]="-"+a+"|--"+availableOptions[a].alias+"\t"+availableOptions[availableOptions[a].alias].description;
+                else if(availableOptions[a].description && !optionHelp[a])
+                    optionHelp[a]="-"+a+"\t"+availableOptions[a].description;
+                else if(!optionHelp[a])
+                    optionHelp[a]="--"+a+"\t"+availableOptions[a].description;
+            })
+            console.log("\nOptions:\n\t"+Object.keys(optionHelp).map(a=>optionHelp[a]).join("\n\t"));
+        }
+    },
+    "add":{
+        description: "Add module to config",
+        fn:(options,args)=>{
+            if(args.length>=2){
+                var _files=args.slice(1);
+                var files=_files.filter((a)=>{
+                    try{
+                        fs.accessSync(a,fs.constants.F_OK);
+                        return true;
+                    }catch(e){
+                        console.log(a+" does not exist");
+                    }
+                });
+                if(files.length!=_files.length) return;
+                if(currentConf.modules[args[0]])
+                    currentConf.modules[args[0]].files=currentConf.modules[args[0]].files.concat(files);
+                else
+                    currentConf.modules[args[0]]={
+                        name: args[0],
+                        files:files,
+                        dependencies:[]
+                    };
+                putTempit();
+                console.log(" + "+args[0]+"\t"+files);
+            }else
+                console.log("add command needs atleast 2 arguments")
+        }
+    },
+    "start":{
+        description:"Start Tempit server",
+        fn:(options,args)=>{
+            var server=net.createServer((c)=>{
+                console.log('client connected');
+                c.on('end', () => {
+                    console.log('client disconnected');
+                });
+                c.on('data', function(data){
+                    var reqObj = JSON.parse(data.toString('utf8'));
+                    if(reqObj.t=="FETCH"){
+                        var mod=reqObj.m;
+                        if(mod.length>0 && !currentConf.modules[mod])
+                            c.write(JSON.stringify({t:"INV_MOD"}));
+                        else{
+                            c.write(JSON.stringify({t:"DATA_NEXT"}));
+                            zipit(mod,(source)=>{
+                                c.write(fs.readFileSync(source));
+                            })
+                        }
+                    }else
+                        c.write(JSON.stringify({t:"INV_TYPE"}));
+                });
+                c.on('error',(err)=>{
+                    console.log(err);
+                })
+            });
+            server.on('error', (err) => {
+                throw err;
+            });
+            var port=args[0] || (currentConf && currentConf.port) || 55555;
+            server.listen(port, () => {
+                console.log('tempit server is ready on',port);
+            });
+        }
+    },
+    "fetch":{
+        description:"Fetch from remote tempit server",
+        fn:(options,args)=>{
+            var ip=args[0];
+            var mod=args[1];
+            var client = new net.Socket();
+            client.connect( (currentConf && currentConf.port) || 55555, ip, function() {
+                console.log('Connected');
+                client.write(JSON.stringify({t:"FETCH",m:mod||""}));
+            });
+            var data_next=false;
+            client.on('data', function(data) {
+                if(!data_next){
+                    var resObj=JSON.parse(data.toString('utf8'));
+                    if(resObj.t=="DATA_NEXT"){
+                        data_next=true
+                    }else{
+                        console.log('Server: ', resObj.t);
+                        client.end()
+                    }
+                }else{
+                    unzipit(data,process.cwd())
+                    client.end();
+                }
+            });
+            client.on('close', function() {
+                console.log('Connection closed');
+            });
+        }
+    },
+}
+
+const availableOptions={
+    "v":{//-v
+        alias: "version"
+    },
+    "version":{//--version
+        description: "Displays version"
+    }
+}
+var {options,command,args}=getOptions(process.argv.slice(2));
+run(command,options,args);
