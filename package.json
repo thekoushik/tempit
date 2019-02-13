@@ -1,7 +1,7 @@
 {
   "name": "tempit",
-  "version": "0.0.9",
-  "description": "Easy Module Management",
+  "version": "0.0.10",
+  "description": "Easy module distribution tool for any project",
   "main": "index.js",
   "bin": {
     "tempit": "./index.js"
@@ -12,11 +12,11 @@
   },
   "keywords": [
     "project",
-    "app",
+    "tool",
     "cli",
     "module",
-    "management",
-    "copy"
+    "distribution",
+    "management"
   ],
   "author": "Koushik Seal",
   "license": "MIT",

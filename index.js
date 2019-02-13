@@ -5,6 +5,7 @@ const process=require('process');
 const path=require('path');
 const TEMPITFILE=".tempit";
 const VERSION=require('./package.json').version;
+const MYPORT=55555;
 var readline = require('readline-sync');
 var tmp = require('tmp');
 const net = require('net');
@@ -23,9 +24,10 @@ const getTempit=()=>{
         return null;
     }
 }
+//using object.assign instead of destructuring because of node version compatibility
 const putTempit=(data)=>{
-    if(!currentConf) currentConf={...data};
-    if(data) currentConf={...currentConf,...data};
+    if(!currentConf) currentConf=Object.assign({},data);//currentConf={...data};
+    if(data) currentConf=Object.assign(currentConf,data)//{...currentConf,...data};
     try{
         fs.writeFileSync(TEMPITFILE,JSON.stringify(currentConf,null,2), 'utf8');
     }catch(e){
@@ -65,7 +67,7 @@ const getOptions=(array)=>{
     })
     return {options,command,args};
 }
-const getConsoleInput=(question)=>readline.question(question);
+
 const run=(cmd,options,args)=>{
     if(cmd && availableCommands[cmd])
         availableCommands[cmd].fn(options,args);
@@ -81,9 +83,10 @@ var freshConf={
     version: "0.0.1",
     description: "Your project description",
     modules:{},
-    port:55555
+    port:MYPORT
 };
 
+//this function needs to be more flexible(better than npm's ignore-walk library)
 var getGitIgnoredFileList=(dir)=>{
     var files=fs.readdirSync(dir || process.cwd());
     try{
@@ -107,8 +110,6 @@ var zipit=(mod,cb)=>{
         files=currentConf.modules[mod].files.length>0?currentConf.modules[mod].files:getGitIgnoredFileList(target_directory);
     tar.c({ z: true, C: target_directory, file: source}, files, (_)=>{
         if(cb) cb(source);
-        //console.log("finish");
-        //fs.copyFileSync(source,target_directory+path.sep+"archive.tgz");
         fs.unlinkSync(source);
     })
 };
@@ -147,7 +148,7 @@ const availableCommands={
             if(!currentConf)
                 doInit();
             else{
-                var v=getConsoleInput("Already initialized. Reinitialize?(y/n) ");
+                var v=readline.question("Already initialized. Reinitialize?(y/n) ");
                 if(v.toLowerCase().startsWith("y")){
                     doInit();
                 }
@@ -230,7 +231,7 @@ const availableCommands={
             server.on('error', (err) => {
                 throw err;
             });
-            var port=args[0] || (currentConf && currentConf.port) || 55555;
+            var port=args[0] || (currentConf && currentConf.port) || MYPORT;
             server.listen(port, () => {
                 console.log('tempit server is ready on',port);
             });
@@ -239,12 +240,19 @@ const availableCommands={
     "fetch":{
         description:"Fetch from remote tempit server",
         fn:(options,args)=>{
-            var ip=args[0];
-            var mod=args[1];
+            var ip=args[0] || "localhost";
+            var mod=args[1] || "";
+            var port=(currentConf && currentConf.port) || MYPORT;
             var client = new net.Socket();
-            client.connect( (currentConf && currentConf.port) || 55555, ip, function() {
-                console.log('Connected');
-                client.write(JSON.stringify({t:"FETCH",m:mod||""}));
+            client.connect(port, ip, function() {
+                //console.log('Connected');
+                client.write(JSON.stringify({t:"FETCH",m:mod}));
+            });
+            client.on('error', function(err) {
+                if(err.code=='ECONNREFUSED')
+                    console.log("Cannot connect to tempit server at "+ip+":"+port+", make sure tempit server is running before fetch");
+                else
+                    console.log(err);
             });
             var data_next=false;
             client.on('data', function(data) {
@@ -261,9 +269,9 @@ const availableCommands={
                     client.end();
                 }
             });
-            client.on('close', function() {
+            /*client.on('close', function() {
                 console.log('Connection closed');
-            });
+            });*/
         }
     },
 }

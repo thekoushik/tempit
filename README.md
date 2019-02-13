@@ -1,5 +1,5 @@
 # tempit
-Easy Module Management
+Easy module distribution tool for any project
 
 ### Prerequisites
 The only thing needed is [Node.js](https://nodejs.org/) to be installed in your system.
@@ -47,3 +47,4 @@ To fetch all modules, just run
 ```
 tempit fetch localhost
 ```
+> **Note:** While fetching, **.git** folder in current directory will be ignored (this feature will be improved in later versions)
