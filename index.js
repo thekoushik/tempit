@@ -10,6 +10,7 @@ var readline = require('readline-sync');
 var tmp = require('tmp');
 const net = require('net');
 var tar=require('tar');
+var walk=require('ignore-walk');
 
 const getTempit=()=>{
     try{
@@ -24,10 +25,9 @@ const getTempit=()=>{
         return null;
     }
 }
-//using object.assign instead of destructuring because of node version compatibility
 const putTempit=(data)=>{
-    if(!currentConf) currentConf=Object.assign({},data);//currentConf={...data};
-    if(data) currentConf=Object.assign(currentConf,data)//{...currentConf,...data};
+    if(!currentConf) currentConf=Object.assign({},data);
+    if(data) currentConf=Object.assign(currentConf,data);
     try{
         fs.writeFileSync(TEMPITFILE,JSON.stringify(currentConf,null,2), 'utf8');
     }catch(e){
@@ -86,15 +86,8 @@ var freshConf={
     port:MYPORT
 };
 
-//this function needs to be more flexible(better than npm's ignore-walk library)
 var getGitIgnoredFileList=(dir)=>{
-    var files=fs.readdirSync(dir || process.cwd());
-    try{
-        fs.accessSync('.gitignore',fs.constants.R_OK);
-        var ignores=fs.readFileSync('.gitignore').toString().split('\r\n').filter(a=>!a.startsWith("#") && a.trim().length>0 && a.indexOf("/")==-1);
-        ignores.push('.git');
-        files=files.filter(f=>!ignores.includes(f))
-    }catch(e){}
+    var files=walk.sync({path:dir || process.cwd(),ignoreFiles:[".gitignore"]}).filter(a=>!a.startsWith(".git/"));
     return files;
 }
 
@@ -209,7 +202,7 @@ const availableCommands={
                 c.on('end', () => {
                     console.log('client disconnected');
                 });
-                c.on('data', function(data){
+                c.on('data', (data)=>{
                     var reqObj = JSON.parse(data.toString('utf8'));
                     if(reqObj.t=="FETCH"){
                         var mod=reqObj.m;
@@ -245,7 +238,7 @@ const availableCommands={
             var port=(currentConf && currentConf.port) || MYPORT;
             var client = new net.Socket();
             client.connect(port, ip, function() {
-                //console.log('Connected');
+                console.log('Connected to server');
                 client.write(JSON.stringify({t:"FETCH",m:mod}));
             });
             client.on('error', function(err) {

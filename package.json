@@ -1,6 +1,6 @@
 {
   "name": "tempit",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Easy module distribution tool for any project",
   "main": "index.js",
   "bin": {
@@ -21,6 +21,7 @@
   "author": "Koushik Seal",
   "license": "MIT",
   "dependencies": {
+    "ignore-walk": "^3.0.1",
     "readline-sync": "^1.4.9",
     "tar": "^4.4.8",
     "tmp": "0.0.33"

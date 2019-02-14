@@ -47,4 +47,4 @@ To fetch all modules, just run
 ```
 tempit fetch localhost
 ```
-> **Note:** While fetching, **.git** folder in current directory will be ignored (this feature will be improved in later versions)
+> **Note:** While fetching, **.git** folder in current directory and all entries in **.gitignore** will be ignored
