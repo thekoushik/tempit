@@ -102,18 +102,11 @@ var zipit=(mod,cb)=>{
     else
         files=currentConf.modules[mod].files.length>0?currentConf.modules[mod].files:getGitIgnoredFileList(target_directory);
     tar.c({ z: true, C: target_directory, file: source}, files, (_)=>{
-        if(cb) cb(source);
-        fs.unlinkSync(source);
+        if(cb) cb(source,_=>fs.unlinkSync(source));
+        else fs.unlinkSync(source)
     })
 };
-var unzipit=(data,target_directory,cb)=>{
-    var source = tmp.tmpNameSync({postfix:".tgz"});
-    fs.writeFileSync(source,data)
-    tar.x({ C: target_directory,keep:false,file:source },(_)=>{
-        if(cb) cb();
-        fs.unlinkSync(source);
-    })
-}
+var unzipit=(filename,target_directory)=> tar.x({ C: target_directory,keep:false,file:filename },_=>fs.unlinkSync(filename));
 
 const availableCommands={
     "init":{
@@ -210,8 +203,13 @@ const availableCommands={
                             c.write(JSON.stringify({t:"INV_MOD"}));
                         else{
                             c.write(JSON.stringify({t:"DATA_NEXT"}));
-                            zipit(mod,(source)=>{
-                                c.write(fs.readFileSync(source));
+                            zipit(mod,(source,done)=>{
+                                var s=fs.createReadStream(source);
+                                s.on('open',_=>s.pipe(c))
+                                s.on('finish',_=>{
+                                    done()
+                                    c.end();
+                                });
                             })
                         }
                     }else
@@ -247,24 +245,34 @@ const availableCommands={
                 else
                     console.log(err);
             });
-            var data_next=false;
+            var data_next=null;
+            var dest=null;
             client.on('data', function(data) {
                 if(!data_next){
                     var resObj=JSON.parse(data.toString('utf8'));
                     if(resObj.t=="DATA_NEXT"){
-                        data_next=true
+                        data_next=tmp.tmpNameSync({postfix:".tgz"});
+                        dest=fs.createWriteStream(data_next);
+                        dest.on('error', function(err) {
+                            client.end();
+                            console.log(err);
+                        });
                     }else{
                         console.log('Server: ', resObj.t);
                         client.end()
                     }
                 }else{
-                    unzipit(data,process.cwd())
-                    client.end();
+                    console.log("Receiving..",data.byteLength+" bytes");
+                    dest.write(data);
                 }
             });
-            /*client.on('close', function() {
+            client.on('close', function() {
                 console.log('Connection closed');
-            });*/
+                if(data_next){
+                    dest=null;
+                    unzipit(data_next,process.cwd())
+                }
+            });
         }
     },
 }
