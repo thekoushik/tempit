@@ -1,7 +1,7 @@
 {
   "name": "tempit",
-  "version": "0.0.12",
-  "description": "Easy module distribution tool for any project",
+  "version": "0.1.0",
+  "description": "Easy module/file distribution tool for any project",
   "main": "index.js",
   "bin": {
     "tempit": "./index.js"
@@ -15,6 +15,7 @@
     "tool",
     "cli",
     "module",
+    "file",
     "distribution",
     "management"
   ],

@@ -1,5 +1,5 @@
 # tempit
-Easy module distribution tool for any project
+Easy module/file distribution tool for any project
 
 ### Prerequisites
 The only thing needed is [Node.js](https://nodejs.org/) to be installed in your system.
@@ -12,7 +12,7 @@ npm install tempit -g
 ```
 
 # Usage
-View Help
+## View Help
 ```
 tempit help
 ```
@@ -22,7 +22,25 @@ tempit help
 tempit -v
 ```
 
-## Initialize directory
+## Start Tempit Server For Sharing
+```
+tempit start
+```
+
+## File listing
+```
+tempit ls localhost directory_name
+```
+> You can use the **ip address** of tempit server instead of **localhost**.
+> If **directory_name** is not specified, current directory of tempit server is assumed.
+
+## Copy file or directory
+```
+tempit cp localhost path
+```
+here **path** can be filename or directory(relative to the current directory of tempit server)
+
+## Initialize directory (for module sharing)
 This will create a **.tempit** file in the current directory. The tempit file is basically a JSON file.
 ```
 tempit init
@@ -33,12 +51,7 @@ tempit init
 tempit add module_name file1 file2 folder1 folder2
 ```
 
-## Start Tempit Server For Sharing
-```
-tempit start
-```
-
-## Fetch From A Tempit Server
+## Fetch Module From A Tempit Server
 To fetch from **localhost**,
 ```
 tempit fetch localhost module_name

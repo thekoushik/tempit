@@ -12,6 +12,28 @@ const net = require('net');
 var tar=require('tar');
 var walk=require('ignore-walk');
 
+const TEMPIT_REQUEST={
+    moduleFetch:"FETCH",
+    pathFetch:"CFETCH",
+    ls:"LS"
+};
+const TEMPIT_RESPONSE={
+    ok:"OK",
+    nextData:"DATA_NEXT",
+    invalidModule:"INV_MOD",
+    invalidPath:"INV_PATH",
+    notDirectory:"INV_DIR",
+    invalidType:"INV_TYPE",
+}
+const TEMPIT_RESPONSE_TEXT={
+    OK:"Success",
+    DATA_NEXT:"Incoming data..",
+    INV_MOD:"Module not found",
+    INV_PATH:"Path not found",
+    INV_TYPE:"Invalid type",
+    INV_DIR:"Not a directory",
+}
+
 const getTempit=()=>{
     try{
         fs.accessSync(TEMPITFILE,fs.constants.F_OK|fs.constants.R_OK)
@@ -91,22 +113,68 @@ var getGitIgnoredFileList=(dir)=>{
     return files;
 }
 
-var zipit=(mod,cb)=>{
+var zipit=(mod,isDirect,cb)=>{
     var target_directory=process.cwd();
     var source=tmp.tmpNameSync({postfix:".tgz"});
     var files=[];
-    if(!mod)
-        files=getGitIgnoredFileList(target_directory);
-    else if(!currentConf.modules[mod])
-        return console.log("Module "+mod+" not found");
-    else
-        files=currentConf.modules[mod].files.length>0?currentConf.modules[mod].files:getGitIgnoredFileList(target_directory);
+    if(isDirect){
+        files.push(mod);
+    }else{
+        if(!mod)
+            files=getGitIgnoredFileList(target_directory);
+        else if(!currentConf.modules[mod])
+            return console.log("Module "+mod+" not found");
+        else
+            files=currentConf.modules[mod].files.length>0?currentConf.modules[mod].files:getGitIgnoredFileList(target_directory);
+    }
     tar.c({ z: true, C: target_directory, file: source}, files, (_)=>{
         if(cb) cb(source,_=>fs.unlinkSync(source));
         else fs.unlinkSync(source)
     })
 };
 var unzipit=(filename,target_directory)=> tar.x({ C: target_directory,keep:false,file:filename },_=>fs.unlinkSync(filename));
+
+var fetchFrom=(port,ip,type,mod)=>{
+    var client = new net.Socket();
+    client.connect(port, ip, function() {
+        console.log('Connected to server');
+        client.write(JSON.stringify({t:type,m:mod}));
+    });
+    client.on('error', function(err) {
+        if(err.code=='ECONNREFUSED')
+            console.log("Cannot connect to tempit server at "+ip+":"+port+", make sure tempit server is running before fetch");
+        else
+            console.log(err);
+    });
+    var data_next=null;
+    var dest=null;
+    client.on('data', function(data) {
+        if(!data_next){
+            var resObj=JSON.parse(data.toString('utf8'));
+            if(resObj.t==TEMPIT_RESPONSE.nextData){
+                data_next=tmp.tmpNameSync({postfix:".tgz"});
+                dest=fs.createWriteStream(data_next);
+                dest.on('error', function(err) {
+                    client.end();
+                    console.log(err);
+                });
+            }else{
+                console.log('Server: ', TEMPIT_RESPONSE_TEXT[resObj.t]);
+                client.end()
+            }
+        }else{
+            console.log("Receiving..",data.byteLength+" bytes");
+            dest.write(data);
+        }
+    });
+    client.on('close', function() {
+        console.log('Connection closed');
+        if(data_next){
+            dest=null;
+            unzipit(data_next,process.cwd())
+        }
+    });
+}
 
 const availableCommands={
     "init":{
@@ -197,13 +265,13 @@ const availableCommands={
                 });
                 c.on('data', (data)=>{
                     var reqObj = JSON.parse(data.toString('utf8'));
-                    if(reqObj.t=="FETCH"){
+                    if(reqObj.t==TEMPIT_REQUEST.moduleFetch){
                         var mod=reqObj.m;
                         if(mod.length>0 && !currentConf.modules[mod])
-                            c.write(JSON.stringify({t:"INV_MOD"}));
+                            c.write(JSON.stringify({t:TEMPIT_RESPONSE.invalidModule}));
                         else{
-                            c.write(JSON.stringify({t:"DATA_NEXT"}));
-                            zipit(mod,(source,done)=>{
+                            c.write(JSON.stringify({t:TEMPIT_RESPONSE.nextData}));
+                            zipit(mod,false,(source,done)=>{
                                 var s=fs.createReadStream(source);
                                 s.on('open',_=>s.pipe(c))
                                 s.on('finish',_=>{
@@ -212,8 +280,48 @@ const availableCommands={
                                 });
                             })
                         }
+                    }else if(reqObj.t==TEMPIT_REQUEST.pathFetch){
+                        var mod=reqObj.m;
+                        try{
+                            console.log("Client requesting file(s):",mod);
+                            fs.accessSync(mod,fs.constants.F_OK);
+                            c.write(JSON.stringify({t:TEMPIT_RESPONSE.nextData}));
+                            zipit(mod,true,(source,done)=>{
+                                var s=fs.createReadStream(source);
+                                s.on('open',_=>s.pipe(c))
+                                s.on('finish',_=>{
+                                    done();
+                                    c.end();
+                                });
+                            })
+                        }catch(e){
+                            c.write(JSON.stringify({t:TEMPIT_RESPONSE.invalidPath}));
+                        }
+                    }else if(reqObj.t==TEMPIT_REQUEST.ls){
+                        var mod=reqObj.m;
+                        if(mod.startsWith("/")) mod="./"+mod;
+                        try{
+                            fs.accessSync(mod,fs.constants.F_OK);
+                            var stat=fs.statSync(mod);
+                            if(!stat.isDirectory()){
+                                c.write(JSON.stringify({t:TEMPIT_RESPONSE.notDirectory}));
+                            }else{
+                                var list=fs.readdirSync(mod).map(function(a){
+                                    var st=fs.statSync(path.resolve(mod,a));
+                                    return {
+                                        name: a,
+                                        type: st.isDirectory()?"D":"F",
+                                        size: st.size
+                                    };
+                                });
+                                c.write(JSON.stringify({t:TEMPIT_RESPONSE.ok,d:list}));
+                            }
+                        }catch(e){
+                            c.write(JSON.stringify({t:TEMPIT_RESPONSE.invalidPath}));
+                        }
+                        c.end();
                     }else
-                        c.write(JSON.stringify({t:"INV_TYPE"}));
+                        c.write(JSON.stringify({t:TEMPIT_RESPONSE.invalidType}));
                 });
                 c.on('error',(err)=>{
                     console.log(err);
@@ -229,15 +337,24 @@ const availableCommands={
         }
     },
     "fetch":{
-        description:"Fetch from remote tempit server",
+        description:"Fetch module from remote tempit server",
         fn:(options,args)=>{
             var ip=args[0] || "localhost";
             var mod=args[1] || "";
             var port=(currentConf && currentConf.port) || MYPORT;
+            fetchFrom(port,ip,TEMPIT_REQUEST.moduleFetch,mod);
+        }
+    },
+    "ls":{
+        description: "Directory and files listing in tempit server",
+        fn:(options,args)=>{
+            var ip=args[0] || "localhost";
+            var mod=args[1] || ".";
+            var port=(currentConf && currentConf.port) || MYPORT;
             var client = new net.Socket();
             client.connect(port, ip, function() {
                 console.log('Connected to server');
-                client.write(JSON.stringify({t:"FETCH",m:mod}));
+                client.write(JSON.stringify({t:TEMPIT_REQUEST.ls,m:mod}));
             });
             client.on('error', function(err) {
                 if(err.code=='ECONNREFUSED')
@@ -245,36 +362,27 @@ const availableCommands={
                 else
                     console.log(err);
             });
-            var data_next=null;
-            var dest=null;
             client.on('data', function(data) {
-                if(!data_next){
-                    var resObj=JSON.parse(data.toString('utf8'));
-                    if(resObj.t=="DATA_NEXT"){
-                        data_next=tmp.tmpNameSync({postfix:".tgz"});
-                        dest=fs.createWriteStream(data_next);
-                        dest.on('error', function(err) {
-                            client.end();
-                            console.log(err);
-                        });
-                    }else{
-                        console.log('Server: ', resObj.t);
-                        client.end()
-                    }
-                }else{
-                    console.log("Receiving..",data.byteLength+" bytes");
-                    dest.write(data);
-                }
-            });
-            client.on('close', function() {
-                console.log('Connection closed');
-                if(data_next){
-                    dest=null;
-                    unzipit(data_next,process.cwd())
-                }
+                var resObj=JSON.parse(data.toString('utf8'));
+                if(resObj.t==TEMPIT_RESPONSE.ok)
+                    console.log(resObj.d.map(function(a){
+                        if(a.type=="D") return "D "+a.name;
+                        return "F "+a.name+"\t"+a.size;
+                    }).join('\n'));
+                else
+                    console.log(TEMPIT_RESPONSE_TEXT[resObj.t]);
             });
         }
     },
+    "cp":{
+        description: "Copy files or directory from remote tempit server(No module required)",
+        fn:(options,args)=>{
+            var ip=args[0] || "localhost";
+            var mod=args[1] || "";
+            var port=(currentConf && currentConf.port) || MYPORT;
+            fetchFrom(port,ip,TEMPIT_REQUEST.pathFetch,mod);
+        }
+    }
 }
 
 const availableOptions={
