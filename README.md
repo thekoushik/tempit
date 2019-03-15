@@ -34,11 +34,16 @@ tempit ls localhost directory_name
 > You can use the **ip address** of tempit server instead of **localhost**.
 > If **directory_name** is not specified, current directory of tempit server is assumed.
 
-## Copy file or directory
+## Copy files or directories
 ```
-tempit cp localhost path
+tempit cp localhost file1 file2
 ```
 here **path** can be filename or directory(relative to the current directory of tempit server)
+
+### Copy all except specified files or directories
+```
+tempit cp localhost -e file1 file2
+```
 
 ## Initialize directory (for module sharing)
 This will create a **.tempit** file in the current directory. The tempit file is basically a JSON file.
