@@ -44,6 +44,12 @@ tempit cp localhost file1 file2
 ```
 here **path** can be filename or directory(relative to the current directory of tempit server)
 
+> If no file path is specified, all files(except ignorable files) will be considered like following:
+
+```
+tempit cp localhost
+```
+
 ### Copy all except specified files or directories
 ```
 tempit cp localhost -e file1 file2
