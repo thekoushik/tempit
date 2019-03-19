@@ -16,6 +16,10 @@ npm install tempit -g
 ```
 tempit help
 ```
+Command specific help
+```
+tempit help cp
+```
 
 ## Version
 ```
@@ -43,6 +47,10 @@ here **path** can be filename or directory(relative to the current directory of 
 ### Copy all except specified files or directories
 ```
 tempit cp localhost -e file1 file2
+```
+wildcards can be used like
+```
+tempit cp localhost -e file1 folder1/file2 folder2*
 ```
 
 ## Initialize directory (for module sharing)
